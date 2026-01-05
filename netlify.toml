@@ -1,0 +1,15 @@
+[build]
+  publish = "dist"
+  command = "npm run build"
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/chat"
+  to = "/.netlify/functions/chat"
+  status = 200
+
+# SPA-Fallback (wichtig: NACH /api/chat)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
