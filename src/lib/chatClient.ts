@@ -12,9 +12,9 @@ export async function getCoachReply(opts: {
   cards: Card[];
   sprintDay: number;
 }): Promise<string> {
-  const endpoint =
-  (import.meta.env.VITE_CHAT_ENDPOINT as string | undefined) ??
-  (import.meta.env.PROD ? "/api/chat" : undefined);
+  const endpoint = import.meta.env.PROD
+  ? "/api/chat"
+  : (import.meta.env.VITE_CHAT_ENDPOINT as string | undefined);
 
   if (!endpoint) {
     if (isDoneMessage(opts.userText)) return buildFollowUpOnDone(opts.cards);
