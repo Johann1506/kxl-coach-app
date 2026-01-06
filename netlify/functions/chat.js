@@ -108,13 +108,27 @@ exports.handler = async (event) => {
 
     const data = await r.json();
 
-    if (!r.ok) {
-      return {
-        statusCode: r.status,
-        headers: corsHeaders,
-        body: JSON.stringify({ error: data?.error || data }),
-      };
-    }
+   if (!r.ok) {
+  // ✅ Demo-Fallback, wenn OpenAI kein Budget/Quota hat
+  const code = data?.error?.code;
+  const isQuota = r.status === 429 && code === "insufficient_quota";
+
+  if (isQuota) {
+    const reply = buildDemoReply({ userText, cards, sprintDay });
+    return {
+      statusCode: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify({ reply, demo: true, reason: "insufficient_quota" }),
+    };
+  }
+
+  return {
+    statusCode: r.status,
+    headers: corsHeaders,
+    body: JSON.stringify({ error: data?.error || data }),
+  };
+}
+
 
     const raw =
       data?.output_text ||
@@ -194,4 +208,45 @@ exports.handler = async (event) => {
       body: JSON.stringify({ error: String(err) }),
     };
   }
+function buildDemoReply({ userText, cards, sprintDay }) {
+  const text = (userText || "").toLowerCase();
+
+  // Simple SRIM heuristics
+  let srim = "Skills";
+  if (/(meeting|stakeholder|netzwerk|kontakt|beziehung|chef|team)/i.test(text)) srim = "Relationships";
+  if (/(wirkung|impact|sichtbar|beförderung|resultat|ergebnis|kpi|ok(r)?)/i.test(text)) srim = "Impact";
+  if (/(angst|zweifel|prokrast|motivation|mindset|block)/i.test(text)) srim = "Mindset";
+
+  const safeCards = Array.isArray(cards) ? cards : [];
+  const pick = safeCards
+    .filter(c => (c?.srim || "").toLowerCase().includes(srim.toLowerCase()))
+    .slice(0, 3);
+
+  const lines = [];
+  lines.push("1. Kurzantwort");
+  lines.push("Demo-Mode aktiv (Quota). Ich halte dich trotzdem im KXL-Training: 1 Schritt, sofort machbar.");
+  lines.push("");
+  lines.push("2. SRIM-Einordnung");
+  lines.push(`Primär: **${srim}**`);
+  lines.push("");
+  lines.push("3. Nächster Schritt (5–15 Min)");
+  lines.push("10 Minuten: Formuliere 1 glasklaren Satz (Problem → gewünschtes Ergebnis → nächster Schritt) und sprich ihn laut 3×.");
+  lines.push("");
+  lines.push("4. Mini-Plan");
+  lines.push("- **Jetzt sofort:** Timer 10 Min, Satz schreiben, 3× laut.");
+  lines.push("- **Heute:** Satz in 1 echtes Gespräch/Chat einbauen.");
+  lines.push("- **Diese Woche:** 3 Wiederholungen (Mo/Mi/Fr), jeweils 10 Min.");
+  lines.push("");
+  lines.push("6. Next Best Cards (1–3)");
+  if (pick.length) {
+    pick.forEach(c => lines.push(`- **Karte:** ${c.title} — **Zweck:** ${c.purpose} — **Link:** ${c.link}`));
+  } else {
+    lines.push("- **Karte:** (keine SRIM-Karten übergeben) — **Zweck:** Füge Cards in der App hinzu — **Link:** [TALENTCARDS_LINK_HIER]");
+  }
+  lines.push("");
+  lines.push("7. Mini-Check");
+  lines.push(`Done/Not Done — hast du den 10-Minuten-Satz jetzt gemacht? (SprintDay: ${sprintDay ?? "n/a"})`);
+
+  return lines.join("\n");
+}
 };
