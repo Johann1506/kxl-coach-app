@@ -1,5 +1,4 @@
 export const handler = async (event) => {
-  // CORS (harmlos auch wenn gleiche Domain)
   const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
@@ -19,7 +18,7 @@ export const handler = async (event) => {
   }
 
   try {
-    const apiKey = process.env.OPENAI_API_KEY; // kommt aus Netlify Environment Variables
+    const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return {
         statusCode: 500,
@@ -28,76 +27,45 @@ export const handler = async (event) => {
       };
     }
 
-    const { message, messages } = JSON.parse(event.body || "{}");
-
-    // Minimaler Fallback, falls dein Frontend nur "message" schickt
-    const userText =
-      message ||
-      (Array.isArray(messages) ? messages.map(m => `${m.role}: ${m.content}`).join("\n") : "") ||
-      "Hi";
+    // Frontend sendet: { userText, messages, sprintDay, cards }
+    const { userText, messages = [], sprintDay, cards } = JSON.parse(event.body || "{}");
 
     const SYSTEM_INSTRUCTIONS = `
 Du bist Karriere-XL Avatar Coach (Kurzname: KXL-Coach).
 Karriere ist Training, nicht Kurs.
-Denke entlang SRIM: Skills, Impact, Relationships, Mindset.
-Arbeite in 14-Tage-Sprints: Tag 1 Deep Day, Tag 7 Review, Tag 14 Review & Commit.
-Ziel jeder Antwort: 1 konkreter Next Step (5–15 Min), sofort trainierbar.
 
-OUTPUT-FORMAT (IMMER):
-1) Kurzantwort (1–3 Sätze)
-2) SRIM-Einordnung (1 Zeile)
-3) Nächster Schritt (5–15 Min)
-4) Mini-Plan: Jetzt sofort / Heute / Diese Woche
-5) Optional: 2 Alternativen (nur wenn User unsicher)
-6) Next Best Cards (1–3) im Format:
+KERNLOGIK: SRIM + 14-TAGE-SPRINTS
+- Denke entlang SRIM: Skills, Impact, Relationships, Mindset.
+- Arbeite in 14-Tage-Sprints (Tag 1 Deep Day, Tag 7 Review, Tag 14 Review & Commit).
+- Ziel: 1 konkreter Next Step (5–15 Min), sofort trainierbar, messbar.
+
+OUTPUT-FORMAT (IMMER GENAU SO)
+1. Kurzantwort (1–3 Sätze)
+2. SRIM-Einordnung (Primär + optional Sekundär)
+3. Nächster Schritt (5–15 Min)
+4. Mini-Plan (Jetzt sofort / Heute / Diese Woche)
+5. Optional: 2 Alternativen (nur wenn User unsicher ist)
+6. Next Best Cards (1–3) im Format:
    - Karte: [Titel] — Zweck: [1 Satz] — Link: [TALENTCARDS_LINK_HIER]
-7) Mini-Check (0–10 oder Done/Not Done)
+7. Mini-Check (0–10 oder Done/Not Done)
 
-Link-Regeln: keine echten URLs erfinden, nur Platzhalter.
-Ton: freundlich, klar, motivierend. Max 1 Emoji.
+Regeln:
+- Keine Links erfinden (nur Platzhalter oder vorhandene Links aus cards).
+- Max 1 Emoji.
 `;
 
-    // OpenAI Responses API
-    const r = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4.1",               // kannst du später ändern
-        input: userText,
-        instructions: SYSTEM_INSTRUCTIONS,
-      }),
-    });
+    // --- KARTENKATALOG (KI darf nur IDs aus diesem Katalog wählen) ---
+    const safeCards = Array.isArray(cards) ? cards : [];
+    const CARD_CATALOG = safeCards
+      .slice(0, 200)
+      .map((c) => `- ${c.id} | ${c.srim} | ${c.title} | ${c.purpose}`)
+      .join("\n");
 
-    const data = await r.json();
+    const SELECTION_RULES = `
+Wähle 1–3 Karten-IDs ausschließlich aus diesem Katalog. Erfinde keine IDs.
+Katalog:
+${CARD_CATALOG || "- (leer)"} 
+`;
 
-    if (!r.ok) {
-      return {
-        statusCode: r.status,
-        headers: corsHeaders,
-        body: JSON.stringify({ error: data?.error || data }),
-      };
-    }
-
-    // Text aus response.output ziehen
-    const text =
-      data?.output
-        ?.flatMap((o) => o?.content || [])
-        ?.find((c) => c?.type === "output_text")
-        ?.text || "";
-
-    return {
-      statusCode: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    };
-  } catch (err) {
-    return {
-      statusCode: 500,
-      headers: corsHeaders,
-      body: JSON.stringify({ error: String(err) }),
-    };
-  }
-};
+    const input =
+      Array.isArray(messages) && messages.len
