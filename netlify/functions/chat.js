@@ -36,6 +36,15 @@ exports.handler = async (event) => {
     const messages = Array.isArray(body.messages) ? body.messages : [];
     const cards = Array.isArray(body.cards) ? body.cards : [];
     const sprintDay = body.sprintDay;
+const strict = String(process.env.KXL_STRICT_MODE || "").toLowerCase() === "true";
+if (strict) {
+  const reply = buildStrictKxlReply({ userText, messages, cards, sprintDay });
+  return {
+    statusCode: 200,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    body: JSON.stringify({ reply, strict: true }),
+  };
+}
 
     const SYSTEM_INSTRUCTIONS =
       "Du bist Karriere-XL Avatar Coach (Kurzname: KXL-Coach). Karriere ist Training, nicht Kurs.\n" +
@@ -246,6 +255,83 @@ function buildDemoReply({ userText, cards, sprintDay }) {
   lines.push("");
   lines.push("7. Mini-Check");
   lines.push(`Done/Not Done — hast du den 10-Minuten-Satz jetzt gemacht? (SprintDay: ${sprintDay ?? "n/a"})`);
+
+  return lines.join("\n");
+}
+function buildStrictKxlReply({ userText, messages, cards, sprintDay }) {
+  // 1) Textquelle: userText bevorzugen, sonst last user message
+  const lastUser =
+    (Array.isArray(messages) ? [...messages].reverse().find(m => m?.role === "user") : null)?.content || "";
+  const topic = (userText || lastUser || "").trim();
+
+  // 2) SRIM heuristics (einfach, aber stabil)
+  const t = topic.toLowerCase();
+  let srim = "Skills";
+  if (/(meeting|stakeholder|netzwerk|kontakt|beziehung|chef|team|konflikt|einwand)/i.test(t)) srim = "Relationships";
+  if (/(wirkung|impact|sichtbar|beförder|resultat|ergebnis|kpi|okr|entscheidung|positionier)/i.test(t)) srim = "Impact";
+  if (/(angst|zweifel|prokrast|motivation|block|mindset|stress|unsicher)/i.test(t)) srim = "Mindset";
+
+  // 3) Cards normalisieren
+  const safeCards = (Array.isArray(cards) ? cards : [])
+    .map((c) => ({
+      id: String(c?.id || ""),
+      srim: String(c?.srim || ""),
+      title: String(c?.title || ""),
+      purpose: String(c?.purpose || ""),
+      link: String(c?.link || "[TALENTCARDS_LINK_HIER]"),
+      tags: Array.isArray(c?.tags) ? c.tags.map(String) : [],
+      keywords: Array.isArray(c?.keywords) ? c.keywords.map(String) : []
+    }))
+    .filter((c) => c.id && c.title);
+
+  // 4) Card Matching: SRIM + Keyword hit
+  const tokens = t.split(/[^a-zäöüß0-9]+/i).filter(Boolean);
+  const scoreCard = (c) => {
+    let s = 0;
+    if ((c.srim || "").toLowerCase().includes(srim.toLowerCase())) s += 5;
+    const hay = `${c.title} ${c.purpose} ${c.tags.join(" ")} ${c.keywords.join(" ")}`.toLowerCase();
+    for (const tok of tokens.slice(0, 12)) {
+      if (tok.length >= 4 && hay.includes(tok)) s += 1;
+    }
+    return s;
+  };
+
+  const picked = safeCards
+    .map((c) => ({ c, s: scoreCard(c) }))
+    .sort((a, b) => b.s - a.s)
+    .slice(0, 3)
+    .map((x) => x.c);
+
+  // 5) Strict Antwort: nur Template + Cards (kein “Freitextwissen”)
+  const nextStep =
+    "10 Minuten: Schreibe 3 Bulletpoints: (1) Situation, (2) gewünschtes Ergebnis, (3) nächster Satz, den du heute sagst. Dann 1× laut sprechen.";
+
+  const lines = [];
+  lines.push("1. Kurzantwort");
+  lines.push("Strict KXL Mode: Wir arbeiten nur mit deinem Training. Ein Schritt, jetzt sofort trainierbar.");
+  lines.push("");
+  lines.push("2. SRIM-Einordnung");
+  lines.push(`Primär: **${srim}**`);
+  lines.push("");
+  lines.push("3. Nächster Schritt (5–15 Min)");
+  lines.push(nextStep);
+  lines.push("");
+  lines.push("4. Mini-Plan");
+  lines.push("- **Jetzt sofort:** Timer 10 Min, 3 Bulletpoints schreiben, 1× laut.");
+  lines.push("- **Heute:** Bulletpoint #3 in 1 echtes Gespräch/Chat einsetzen.");
+  lines.push("- **Diese Woche:** 3 Wiederholungen + 1 Mini-Review (0–10).");
+  lines.push("");
+  lines.push("6. Next Best Cards (1–3)");
+  if (picked.length) {
+    picked.forEach((c) => {
+      lines.push(`- **Karte:** ${c.title} — **Zweck:** ${c.purpose} — **Link:** ${c.link}`);
+    });
+  } else {
+    lines.push("- **Karte:** (keine Cards übergeben) — **Zweck:** Card-Library in der App befüllen — **Link:** [TALENTCARDS_LINK_HIER]");
+  }
+  lines.push("");
+  lines.push("7. Mini-Check");
+  lines.push(`Done/Not Done — hast du die 10 Minuten erledigt? (SprintDay: ${sprintDay ?? "n/a"})`);
 
   return lines.join("\n");
 }
