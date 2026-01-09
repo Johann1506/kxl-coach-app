@@ -1,3 +1,4 @@
+import CARDS from "./cards";
 import { Card, ChatMessage } from "./types";
 import { demoReply, isDoneMessage, buildFollowUpOnDone } from "./demoCoach";
 
@@ -28,7 +29,8 @@ export async function getCoachReply(opts: {
       userText: opts.userText,
       messages: opts.messages.map(m => ({ role: m.role, content: m.content })),
       sprintDay: opts.sprintDay,
-      cards: opts.cards,
+      cards: opts.cards ?? CARDS,
+
     }),
   });
 
